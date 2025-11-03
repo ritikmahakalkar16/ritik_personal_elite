@@ -913,13 +913,13 @@ cron.schedule('0 0 * * *', async () => {
 const app = express();
 app.set("trust proxy", 1);
 app.use(helmet());
-//app.use(cors());
-app.use(cors({
-  origin: 'http://localhost:8080', // your frontend
-  credentials: true,
-  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+app.use(cors());
+// app.use(cors({
+//   origin: 'http://localhost:8080', // your frontend
+//   credentials: true,
+//   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+//   allowedHeaders: ['Content-Type', 'Authorization'],
+// }));
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static(uploadDir));
 app.use('/auth', authLimiter);
@@ -3808,3 +3808,4 @@ async function startServer() {
 
 
 startServer();
+
