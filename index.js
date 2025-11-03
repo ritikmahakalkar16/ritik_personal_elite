@@ -2,6 +2,7 @@
 
 
 
+
 // server.js — FULL SINGLE-FILE BACKEND (NO PART SKIPPED)
 const express = require('express');
 const mongoose = require('mongoose');
@@ -289,11 +290,10 @@ const OtpToken = mongoose.model('OtpToken', otpTokenSchema);
 const AuditTrail = mongoose.model('AuditTrail', auditTrailSchema);
 
 // ------------------- EMAIL & MULTER -------------------
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: { user: GMAIL_EMAIL, pass: GMAIL_APP_PASSWORD },
-  secure: true,
-});
+import { Resend } from 'resend';
+
+// Initialise once
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
@@ -911,15 +911,14 @@ cron.schedule('0 0 * * *', async () => {
 
 // ------------------- EXPRESS APP -------------------
 const app = express();
-app.set("trust proxy", 1);
 app.use(helmet());
-app.use(cors());
-// app.use(cors({
-//   origin: 'http://localhost:8080', // your frontend
-//   credentials: true,
-//   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-//   allowedHeaders: ['Content-Type', 'Authorization'],
-// }));
+//app.use(cors());
+app.use(cors({
+  origin: 'http://localhost:8080', // your frontend
+  credentials: true,
+  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static(uploadDir));
 app.use('/auth', authLimiter);
@@ -1013,22 +1012,40 @@ async function setupDatabase() {
 }
 
 // ------------------- AUTH ROUTES -------------------
-async function sendOTP(email) {
-  const profile = await Profile.findOne({ email });
-  if (!profile) throw new Error('Email not found');
+const sendOTP = async (email) => {
+  try {
+    // 1. Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const hashedOtp = await hashPassword(otp);
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const hashedOtp = await hashPassword(otp);
-  await OtpToken.create({ email, hashed_otp: hashedOtp });
+    // 2. Save to DB (5-min expiry)
+    await OtpToken.create({
+      email,
+      hashed_otp: hashedOtp,
+      created_at: new Date(),
+    });
 
-  await transporter.sendMail({
-    from: GMAIL_EMAIL,
-    to: email,
-    subject: 'Elite Wealth OTP',
-    html: `<h1>Elite Wealth OTP</h1><p>Your OTP is <strong>${otp}</strong>.</p>`,
-  });
-}
+    // 3. Send via Resend (API, no timeout)
+    await resend.emails.send({
+      from: 'Elite Wealth <onboarding@resend.dev>',   // Must be verified in Resend
+      to: [email],
+      subject: 'Your Elite Wealth OTP',
+      html: `
+        <div style="font-family: Arial, sans-serif; text-align: center; padding: 30px; background: #f9f9f9; border-radius: 10px;">
+          <h2 style="color: #1d4ed8;">Elite Wealth</h2>
+          <p>Your one-time password is:</p>
+          <h1 style="font-size: 36px; color: #1d4ed8; letter-spacing: 5px;">${otp}</h1>
+          <p style="color: #666;">Valid for <strong>5 minutes</strong>.</p>
+        </div>
+      `,
+    });
 
+    console.log(`OTP sent to ${email}: ${otp}`); // Remove in prod
+  } catch (err) {
+    console.error('sendOTP error:', err);
+    throw new Error('Failed to send OTP');
+  }
+};
 app.post('/auth/sessions', async (req, res) => {
   try {
     const { email } = ProfileCreateSchema.pick({ email: true }).parse(req.body);
@@ -3806,6 +3823,4 @@ async function startServer() {
   });
 }
 
-
 startServer();
-
